@@ -40,3 +40,17 @@ class PermitRecord:
     approved_at: datetime
     finished_at: datetime | None
     boot_ids_at_approval: dict[str, str]  # 获批时各节点最新报告中的启动标识
+
+
+@dataclass(frozen=True)
+class RecoveryPermit:
+    """恢复清单中的一条获批回执（已规范化：节点有序去重、时间归一到 UTC）。
+
+    执行器确认"仍未结单"的许可，补登时沿用原申请号、节点、
+    获批时间和获批时各节点的启动标识。
+    """
+
+    request_id: str
+    nodes: tuple[str, ...]  # 有序、去重
+    approved_at: datetime
+    boot_ids_at_approval: dict[str, str]

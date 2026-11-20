@@ -35,6 +35,13 @@ CREATE TABLE IF NOT EXISTS permits (
     finished_at TEXT,
     boot_ids_at_approval TEXT NOT NULL    -- JSON 对象 node -> boot_id
 );
+
+CREATE TABLE IF NOT EXISTS recoveries (
+    recovery_id TEXT PRIMARY KEY,   -- 恢复编号（一次恢复一个编号）
+    payload TEXT NOT NULL,          -- 规范化后的补登清单 JSON（重放比对用）
+    result TEXT NOT NULL,           -- 首次成功的响应体 JSON（重放原样返回）
+    completed_at TEXT NOT NULL      -- 恢复完成时间（补登与恢复发证同事务生效）
+);
 """
 
 # 每个节点取采样时间最新的一份；采样时间并列时取后写入的一条。
@@ -168,4 +175,36 @@ class Store:
                 "UPDATE permits SET status = 'finished', finished_at = ? "
                 "WHERE request_id = ?",
                 (to_iso(finished_at), request_id),
+            )
+
+    # ---- 恢复记录 ----
+
+    def get_recovery(self, recovery_id: str) -> dict | None:
+        """查恢复记录；None 表示该编号尚未完成恢复。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT payload, result, completed_at FROM recoveries "
+                "WHERE recovery_id = ?",
+                (recovery_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return {
+            "payload": row["payload"],
+            "result": json.loads(row["result"]),
+            "completed_at": parse_iso(row["completed_at"]),
+        }
+
+    def record_recovery(self, recovery_id: str, payload: str, result: dict, completed_at) -> None:
+        """记录恢复完成。须在事务内与补登许可一起提交，保证一同生效。"""
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO recoveries (recovery_id, payload, result, completed_at) "
+                "VALUES (?,?,?,?)",
+                (
+                    recovery_id,
+                    payload,
+                    json.dumps(result, ensure_ascii=False),
+                    to_iso(completed_at),
+                ),
             )
